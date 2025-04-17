@@ -46,21 +46,28 @@
       text-decoration: underline;
     }
 
-    /* Styles for note visualization */
     .active-notes-container {
       width: 100%;
       display: flex;
       gap: 50px;
-      /* min-height: 100px; */
+      rotate: -40deg;
+      justify-content: center;
+      /* margin: 20px 0; */
     }
 
-    .active-note {
+    .note {
       display: inline-block;
       border-radius: 5px;
       font-weight: bold;
-      font-size: 100px;
+      font-size: 70px;
       text-align: left;
+      opacity: 0.1;
+      transition: opacity 0.1s ease-out;
+    }
+
+    .active-note {
       animation: pulse 0.5s infinite alternate;
+      opacity: 1;
     }
 
     @keyframes pulse {
@@ -108,7 +115,7 @@
   <div class="active-notes-container" id="activeNotesDisplay"></div>
 
   <div class="key-mapping">
-    <span class="underline">scale of D#</span> <span>1 -- D#</span> <span>2 -- F</span> <span>3 -- F#</span>
+    <span class="underline">scale of D# minor</span> <span>1 -- D#</span> <span>2 -- F</span> <span>3 -- F#</span>
     <span>4 -- G#</span> <span>5 -- A#</span> <span>6 -- B</span> <span>7 -- C#</span> <span>8 -- D#</span>
     <span>9 -- F</span> <span>0 -- F#</span>
   </div>
@@ -133,9 +140,9 @@
       '5': { name: 'A#', getNote: (octave) => `A#${octave}` },      // Perfect 4th
       '6': { name: 'B', getNote: (octave) => `B${octave}` },        // Diminished 5th
       '7': { name: 'C#', getNote: (octave) => `C#${octave + 1}` },    // Minor 6th
-      '8': { name: 'D#', getNote: (octave) => `D#${octave + 1}` }, // Root octave
-      '9': { name: 'F', getNote: (octave) => `F${octave + 1}` },   // Minor 2nd octave
-      '0': { name: 'F#', getNote: (octave) => `F#${octave + 1}` }  // Major 2nd octave
+      '8': { name: 'D#', getNote: (octave) => `D#${octave + 1}` },    // Root octave
+      '9': { name: 'F', getNote: (octave) => `F${octave + 1}` },      // Minor 2nd octave
+      '0': { name: 'F#', getNote: (octave) => `F#${octave + 1}` }     // Major 2nd octave
     };
 
     // Get all the DOM elements
@@ -152,6 +159,21 @@
     // Initialize audio context right away (but don't start until user interaction)
     const audioContext = new Tone.Context({ latencyHint: 'interactive' });
     Tone.setContext(audioContext);
+
+    // Initialize the note display with all possible notes
+    function initializeNoteDisplay() {
+      // Create all note elements
+      Object.keys(NOTES).forEach(key => {
+        const noteElement = document.createElement('div');
+        noteElement.className = 'note';
+        noteElement.textContent = NOTES[key].name;
+        noteElement.id = `note-${key}`;
+        activeNotesDisplay.appendChild(noteElement);
+      });
+    }
+
+    // Call this once on page load
+    initializeNoteDisplay();
 
     // Update display value when sliders change
     distortionSlider.addEventListener('input', () => {
@@ -236,7 +258,7 @@
           sustain: 0.6,
           release: 1.5,
         },
-        volume: -6  // Prevent clipping
+        volume: -15  // Prevent clipping
       }).connect(delay);
 
       // Reset activeNotes when updating synth
@@ -246,21 +268,20 @@
 
     // Function to update the active notes display
     function updateActiveNotesDisplay() {
-      // Clear the display
-      activeNotesDisplay.innerHTML = '';
+      // First, make all notes inactive
+      Object.keys(NOTES).forEach(key => {
+        const noteElement = document.getElementById(`note-${key}`);
+        if (noteElement) {
+          noteElement.classList.remove('active-note');
+        }
+      });
 
-      // If no notes are playing, show a placeholder
-      if (activeNotes.size === 0) {
-        return;
-      }
-
-      // For each active note, create a visual element
-      activeNotes.forEach(noteKey => {
-        const noteElement = document.createElement('div');
-        noteElement.className = 'active-note';
-        noteElement.textContent = NOTES[noteKey].name;
-        noteElement.id = `note-${noteKey}`;
-        activeNotesDisplay.appendChild(noteElement);
+      // Then highlight only the active ones
+      activeNotes.forEach(key => {
+        const noteElement = document.getElementById(`note-${key}`);
+        if (noteElement) {
+          noteElement.classList.add('active-note');
+        }
       });
     }
 
