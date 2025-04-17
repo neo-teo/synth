@@ -41,6 +41,43 @@
     #detune {
       display: none;
     }
+
+    .underline {
+      text-decoration: underline;
+    }
+
+    /* Styles for note visualization */
+    .active-notes-container {
+      width: 100%;
+      display: flex;
+      gap: 50px;
+      /* min-height: 100px; */
+    }
+
+    .active-note {
+      display: inline-block;
+      border-radius: 5px;
+      font-weight: bold;
+      font-size: 100px;
+      text-align: left;
+      animation: pulse 0.5s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from {
+        opacity: 0.6;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    .key-mapping {
+      display: flex;
+      /* flex-direction: column; */
+      gap: 20px;
+    }
   </style>
 </head>
 
@@ -67,8 +104,13 @@
     </div>
   </div>
 
+  <!-- Container for active notes visualization -->
+  <div class="active-notes-container" id="activeNotesDisplay"></div>
+
   <div class="key-mapping">
-    <p><strong>Key mapping:</strong> 1:D# 2:F 3:F# 4:G# 5:A# 6:B 7:C# 8:D# 9:F 0:F#</p>
+    <span class="underline">scale of D#</span> <span>1 -- D#</span> <span>2 -- F</span> <span>3 -- F#</span>
+    <span>4 -- G#</span> <span>5 -- A#</span> <span>6 -- B</span> <span>7 -- C#</span> <span>8 -- D#</span>
+    <span>9 -- F</span> <span>0 -- F#</span>
   </div>
 
   <script>
@@ -80,8 +122,8 @@
     let delay = null;
     let initialized = false;
     let activeNotes = new Set();
+    const activeNotesDisplay = document.getElementById('activeNotesDisplay');
 
-    // Single source of truth for note definitions
     const NOTES = {
       // D# minor scale: D#, F, F#, G#, A#, B, C#, D# (one octave)
       '1': { name: 'D#', getNote: (octave) => `D#${octave}` },      // Root
@@ -91,9 +133,9 @@
       '5': { name: 'A#', getNote: (octave) => `A#${octave}` },      // Perfect 4th
       '6': { name: 'B', getNote: (octave) => `B${octave}` },        // Diminished 5th
       '7': { name: 'C#', getNote: (octave) => `C#${octave + 1}` },    // Minor 6th
-      '8': { name: 'D# (octave)', getNote: (octave) => `D#${octave + 1}` }, // Root octave
-      '9': { name: 'F (octave)', getNote: (octave) => `F${octave + 1}` },   // Minor 2nd octave
-      '0': { name: 'F# (octave)', getNote: (octave) => `F#${octave + 1}` }  // Major 2nd octave
+      '8': { name: 'D#', getNote: (octave) => `D#${octave + 1}` }, // Root octave
+      '9': { name: 'F', getNote: (octave) => `F${octave + 1}` },   // Minor 2nd octave
+      '0': { name: 'F#', getNote: (octave) => `F#${octave + 1}` }  // Major 2nd octave
     };
 
     // Get all the DOM elements
@@ -199,118 +241,82 @@
 
       // Reset activeNotes when updating synth
       activeNotes.clear();
+      updateActiveNotesDisplay();
     }
 
-    // Play a note
-    function playNote(noteKey) {
+    // Function to update the active notes display
+    function updateActiveNotesDisplay() {
+      // Clear the display
+      activeNotesDisplay.innerHTML = '';
+
+      // If no notes are playing, show a placeholder
+      if (activeNotes.size === 0) {
+        return;
+      }
+
+      // For each active note, create a visual element
+      activeNotes.forEach(noteKey => {
+        const noteElement = document.createElement('div');
+        noteElement.className = 'active-note';
+        noteElement.textContent = NOTES[noteKey].name;
+        noteElement.id = `note-${noteKey}`;
+        activeNotesDisplay.appendChild(noteElement);
+      });
+    }
+
+    // Combined function to handle both note on and off
+    function toggleNote(noteKey, state) {
       if (!initialized) {
         initializeAudio().then(() => {
-          triggerNote(noteKey);
+          handleNote(noteKey, state);
         });
       } else {
-        triggerNote(noteKey);
+        handleNote(noteKey, state);
       }
     }
 
     const octave = 3;
 
-    function triggerNote(noteKey) {
-      if (!synth) return;
+    // Handle note on/off state changes
+    function handleNote(noteKey, state) {
+      if (!synth || !NOTES[noteKey]) return;
 
+      const note = NOTES[noteKey].getNote(octave);
 
-      if (NOTES[noteKey]) {
-        // Start the note if it's not already playing
+      if (state === 'on') {
+        // Only trigger if not already playing
         if (!activeNotes.has(noteKey)) {
-          const note = NOTES[noteKey].getNote(octave);
           synth.triggerAttack(note);
           activeNotes.add(noteKey);
+          updateActiveNotesDisplay();
+        }
+      } else if (state === 'off') {
+        // Only release if currently playing
+        if (activeNotes.has(noteKey)) {
+          synth.triggerRelease(note);
+          activeNotes.delete(noteKey);
+          updateActiveNotesDisplay();
         }
       }
     }
 
-    function stopNote(noteKey) {
-      if (!synth || !activeNotes.has(noteKey)) return;
-
-      if (NOTES[noteKey]) {
-        const note = NOTES[noteKey].getNote(octave);
-        synth.triggerRelease(note);
-        activeNotes.delete(noteKey);
-      }
-    }
-
-    // Keyboard event listener
+    // Combined keyboard event listener
     document.addEventListener('keydown', (event) => {
       // Prevent repeat events when key is held down
       if (event.repeat) return;
 
-      // Map keys 1-6 to notes
-      switch (event.key) {
-        case '1':
-          playNote('1');
-          break;
-        case '2':
-          playNote('2');
-          break;
-        case '3':
-          playNote('3');
-          break;
-        case '4':
-          playNote('4');
-          break;
-        case '5':
-          playNote('5');
-          break;
-        case '6':
-          playNote('6');
-          break;
-        case '7':
-          playNote('7');
-          break;
-        case '8':
-          playNote('8');
-          break;
-        case '9':
-          playNote('9');
-          break;
-        case '0':
-          playNote('0');
-          break;
+      // Check if the key is one of our note keys
+      const key = event.key;
+      if (NOTES[key]) {
+        toggleNote(key, 'on');
       }
     });
 
-    // Add keyup event listener to stop the sound when key is released
+    // Add keyup event listener
     document.addEventListener('keyup', (event) => {
-      switch (event.key) {
-        case '1':
-          stopNote('1');
-          break;
-        case '2':
-          stopNote('2');
-          break;
-        case '3':
-          stopNote('3');
-          break;
-        case '4':
-          stopNote('4');
-          break;
-        case '5':
-          stopNote('5');
-          break;
-        case '6':
-          stopNote('6');
-          break;
-        case '7':
-          stopNote('7');
-          break;
-        case '8':
-          stopNote('8');
-          break;
-        case '9':
-          stopNote('9');
-          break;
-        case '0':
-          stopNote('0');
-          break;
+      const key = event.key;
+      if (NOTES[key]) {
+        toggleNote(key, 'off');
       }
     });
 
