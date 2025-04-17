@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Synth</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0px 0px 0px;
+      height: 97vh;
+    }
+
+    h1 {
+      text-align: center;
+    }
+
+
+    .controls {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    #reverb {
+      display: none;
+    }
+
+    #detune {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="controls">
+    <div class="control">
+      <label for="distortion">distort: <span id="distortionValue">2.0</span></label>
+      <input type="range" id="distortion" min="0" max="10" step="0.1" value="2" />
+    </div>
+
+    <div class="control">
+      <label for="filterFreq">filter fqn: <span id="filterFreqValue">2000</span>Hz</label>
+      <input type="range" id="filterFreq" min="100" max="8000" step="100" value="2000" />
+    </div>
+
+    <div class="control" id="reverb">
+      <label for="reverbWet">reverb: <span id="reverbWetValue">30</span>%</label>
+      <input type="range" id="reverbWet" min="0" max="1" step="0.01" value="0.3" />
+    </div>
+
+    <div class="control" id="detune">
+      <label for="detune">detune: <span id="detuneValue">10.0</span></label>
+      <input type="range" id="detune" min="0" max="50" step="1" value="10" />
+    </div>
+  </div>
+
+  <div class="key-mapping">
+    <p><strong>Key mapping:</strong> 1:D# 2:F 3:F# 4:G# 5:A# 6:B 7:C# 8:D# 9:F 0:F#</p>
+  </div>
+
+  <script>
+    let synth = null;
+    let filter = null;
+    let reverb = null;
+    let dist = null;
+    let phaser = null;
+    let delay = null;
+    let initialized = false;
+    let activeNotes = new Set();
+
+    // Single source of truth for note definitions
+    const NOTES = {
+      // D# minor scale: D#, F, F#, G#, A#, B, C#, D# (one octave)
+      '1': { name: 'D#', getNote: (octave) => `D#${octave}` },      // Root
+      '2': { name: 'F', getNote: (octave) => `F${octave}` },        // Minor 2nd
+      '3': { name: 'F#', getNote: (octave) => `F#${octave}` },      // Major 2nd
+      '4': { name: 'G#', getNote: (octave) => `G#${octave}` },      // Minor 3rd
+      '5': { name: 'A#', getNote: (octave) => `A#${octave}` },      // Perfect 4th
+      '6': { name: 'B', getNote: (octave) => `B${octave}` },        // Diminished 5th
+      '7': { name: 'C#', getNote: (octave) => `C#${octave + 1}` },    // Minor 6th
+      '8': { name: 'D# (octave)', getNote: (octave) => `D#${octave + 1}` }, // Root octave
+      '9': { name: 'F (octave)', getNote: (octave) => `F${octave + 1}` },   // Minor 2nd octave
+      '0': { name: 'F# (octave)', getNote: (octave) => `F#${octave + 1}` }  // Major 2nd octave
+    };
+
+    // Get all the DOM elements
+    const distortionSlider = document.getElementById('distortion');
+    const filterFreqSlider = document.getElementById('filterFreq');
+    const reverbWetSlider = document.getElementById('reverbWet');
+    const detuneSlider = document.getElementById('detune');
+
+    const distortionValue = document.getElementById('distortionValue');
+    const filterFreqValue = document.getElementById('filterFreqValue');
+    const reverbWetValue = document.getElementById('reverbWetValue');
+    const detuneValue = document.getElementById('detuneValue');
+
+    // Initialize audio context right away (but don't start until user interaction)
+    const audioContext = new Tone.Context({ latencyHint: 'interactive' });
+    Tone.setContext(audioContext);
+
+    // Update display value when sliders change
+    distortionSlider.addEventListener('input', () => {
+      distortionValue.textContent = parseFloat(
+        distortionSlider.value
+      ).toFixed(1);
+      if (initialized) updateSynth();
+    });
+
+    filterFreqSlider.addEventListener('input', () => {
+      filterFreqValue.textContent = filterFreqSlider.value;
+      if (initialized) updateSynth();
+    });
+
+    reverbWetSlider.addEventListener('input', () => {
+      reverbWetValue.textContent = Math.round(reverbWetSlider.value * 100);
+      if (initialized) updateSynth();
+    });
+
+    detuneSlider.addEventListener('input', () => {
+      detuneValue.textContent = parseFloat(detuneSlider.value).toFixed(1);
+      if (initialized) updateSynth();
+    });
+
+    // Initialize audio context on user interaction
+    async function initializeAudio() {
+      await Tone.start();
+      initialized = true;
+      updateSynth();
+    }
+
+    // Create or update the synth and effects chain
+    function updateSynth() {
+      // Dispose previous instances if they exist
+      if (synth) synth.dispose();
+      if (filter) filter.dispose();
+      if (reverb) reverb.dispose();
+      if (dist) dist.dispose();
+      if (phaser) phaser.dispose();
+      if (delay) delay.dispose();
+
+      // Get values from sliders
+      const distortionAmount = parseFloat(distortionSlider.value);
+      const filterFrequency = parseFloat(filterFreqSlider.value);
+      const reverbAmount = parseFloat(reverbWetSlider.value);
+      const detuneAmount = parseFloat(detuneSlider.value);
+
+      // Optimize effects chain to reduce latency
+      filter = new Tone.Filter({
+        frequency: filterFrequency,
+        type: 'lowpass',
+        Q: 1
+      }).toDestination();
+
+      // Simplified reverb for less CPU usage
+      reverb = new Tone.JCReverb({
+        roomSize: 0.5,
+        wet: reverbAmount
+      }).connect(filter);
+
+      dist = new Tone.Distortion({
+        distortion: distortionAmount,
+        oversample: '2x'  // Less CPU intensive than '4x'
+      }).connect(reverb);
+
+      delay = new Tone.FeedbackDelay({
+        delayTime: '8n',
+        feedback: 0.25,
+        maxDelay: 0.1  // Limit maximum delay to reduce buffer size
+      }).connect(dist);
+
+      // Create synth
+      synth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: {
+          type: 'sawtooth',
+          count: 3,
+          spread: detuneAmount,
+        },
+        envelope: {
+          attack: 0.01,  // Faster attack for less perceived latency
+          decay: 0.3,
+          sustain: 0.6,
+          release: 1.5,
+        },
+        volume: -6  // Prevent clipping
+      }).connect(delay);
+
+      // Reset activeNotes when updating synth
+      activeNotes.clear();
+    }
+
+    // Play a note
+    function playNote(noteKey) {
+      if (!initialized) {
+        initializeAudio().then(() => {
+          triggerNote(noteKey);
+        });
+      } else {
+        triggerNote(noteKey);
+      }
+    }
+
+    const octave = 3;
+
+    function triggerNote(noteKey) {
+      if (!synth) return;
+
+
+      if (NOTES[noteKey]) {
+        // Start the note if it's not already playing
+        if (!activeNotes.has(noteKey)) {
+          const note = NOTES[noteKey].getNote(octave);
+          synth.triggerAttack(note);
+          activeNotes.add(noteKey);
+        }
+      }
+    }
+
+    function stopNote(noteKey) {
+      if (!synth || !activeNotes.has(noteKey)) return;
+
+      if (NOTES[noteKey]) {
+        const note = NOTES[noteKey].getNote(octave);
+        synth.triggerRelease(note);
+        activeNotes.delete(noteKey);
+      }
+    }
+
+    // Keyboard event listener
+    document.addEventListener('keydown', (event) => {
+      // Prevent repeat events when key is held down
+      if (event.repeat) return;
+
+      // Map keys 1-6 to notes
+      switch (event.key) {
+        case '1':
+          playNote('1');
+          break;
+        case '2':
+          playNote('2');
+          break;
+        case '3':
+          playNote('3');
+          break;
+        case '4':
+          playNote('4');
+          break;
+        case '5':
+          playNote('5');
+          break;
+        case '6':
+          playNote('6');
+          break;
+        case '7':
+          playNote('7');
+          break;
+        case '8':
+          playNote('8');
+          break;
+        case '9':
+          playNote('9');
+          break;
+        case '0':
+          playNote('0');
+          break;
+      }
+    });
+
+    // Add keyup event listener to stop the sound when key is released
+    document.addEventListener('keyup', (event) => {
+      switch (event.key) {
+        case '1':
+          stopNote('1');
+          break;
+        case '2':
+          stopNote('2');
+          break;
+        case '3':
+          stopNote('3');
+          break;
+        case '4':
+          stopNote('4');
+          break;
+        case '5':
+          stopNote('5');
+          break;
+        case '6':
+          stopNote('6');
+          break;
+        case '7':
+          stopNote('7');
+          break;
+        case '8':
+          stopNote('8');
+          break;
+        case '9':
+          stopNote('9');
+          break;
+        case '0':
+          stopNote('0');
+          break;
+      }
+    });
+
+    // Pre-initialize the audio context to reduce startup latency
+    window.addEventListener('load', () => {
+      audioContext.resume();
+    });
+  </script>
+</body>
+
+</html>
